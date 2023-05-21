@@ -1,0 +1,184 @@
+version: 3
+
+set: [ pipefail ]
+
+dotenv: [ '.local.env' ]
+
+vars:
+  INFRA_DIR: '{{ .INFRA_DIR | default "./example" }}' # TODO prepare example directory, for now setting env INFRA_DIR is mandatory
+  GODOC_PORT: "6060"
+
+tasks:
+  build:
+    desc: "Builds CLI"
+    deps:
+      - setup
+    cmds:
+      - go build -o ./bin/terradep ./cmd/cli
+
+  run:
+    desc: "Runs CLI on infra repo"
+    deps:
+      - setup
+    cmds:
+      - go run ./cmd/cli {{ .INFRA_DIR }}/{{ .CLI_ARGS | splitList " " | join "/" }}
+
+  run:ascii:
+    deps:
+      - setup
+    desc: -|
+      Runs CLI on infra repo and produces graph in ASCII
+      Requires having graph-easy installed locally on via whalebrew
+      Ubuntu/Debian - https://stackoverflow.com/questions/3211801/graphviz-and-ascii-output
+      Mac (native) - https://stackoverflow.com/a/3391213/11342101
+      Mac (Docker/whalebrew) - https://stackoverflow.com/a/55403011/11342101
+    preconditions:
+      - command -v graph-easy >> /dev/null
+    cmds:
+      - go run ./cmd/cli {{ .INFRA_DIR}}/{{ .CLI_ARGS | splitList " " | join "/" }} ./bin/{{ .CLI_ARGS | splitList " " | last }}.dot
+      - graph-easy --from_graphviz --as=boxart --output=./bin/{{ .CLI_ARGS | splitList " " | last }}.txt ./bin/{{ .CLI_ARGS | splitList " " | last }}.dot
+  test:
+    desc: "Runs all the tests"
+    deps:
+      - setup
+    cmds:
+      - mkdir -p ./bin
+      - go test -count 1 -coverprofile=./bin/coverage.out -coverpkg=./... -json > ./bin/gotest.json -v ./...
+
+  test:reports:
+    desc: "Generate test reports based on code coverage"
+    preconditions:
+      - sh: test -f ./bin/coverage.out
+        msg: there is no coverage report in ./bin/coverage.out - you can generate it with task test
+    cmds:
+      - go tool cover -html=./bin/coverage.out -o ./bin/coverageReport.html
+      - go tool cover -func=./bin/coverage.out | grep total | grep -Eo '[0-9]+\.[0-9]+' > ./bin/totalCoverageReport.txt
+      - echo "Total code coverage is $(cat ./bin/totalCoverageReport.txt)%"
+
+  deps:
+    desc: "Downloads the dependencies"
+    cmds:
+      - go mod download
+
+  deps:scan:
+    desc: "Scans dependencies for vulnerabilities"
+    cmds:
+      - go run golang.org/x/vuln/cmd/govulncheck -v ./...
+
+  gen:
+    desc: "Generates source code"
+    cmds:
+      - go generate ./...
+
+  gen:clean:
+    desc: "Cleans generated source code"
+    cmds:
+      - echo "no generated code to clean"
+
+  fmt:
+    desc: "Runs code formatter"
+    cmds:
+      - go run mvdan.cc/gofumpt -extra -l -w .
+
+  lint:
+    desc: "Runs code linters and generates the reports"
+    cmds:
+      - mkdir -p ./bin
+      - go run mvdan.cc/gofumpt -extra -l -e . | xargs --no-run-if-empty sh -c "echo 'code is not gofumpt-ed, run task fmt'; exit 1"
+      - go run github.com/editorconfig-checker/editorconfig-checker/cmd/editorconfig-checker
+      - go run github.com/golangci/golangci-lint/cmd/golangci-lint run --out-format 'colored-line-number:stdout,checkstyle:./bin/golangciReport.xml'
+
+  lint:mod:
+    desc: "Checks if go.mod does not contain 'replace' directives"
+    cmds:
+      - grep -e "replace.*=>.*" -q go.mod && echo "go.mod cannot contain 'replace' directives" && exit 2 || true
+
+  lint:dirty:
+    desc: "Checks if Git working tree is dirty"
+    cmds:
+      - |
+        if [[ $(git diff --stat) != '' ]]; then
+          echo "You have unstaged/uncommitted changes"
+          echo "If it fails on CI 'task gen' might have re-generated some code which you forgot to generate and commit"
+          echo "If those are some CI-specific files, like test reports, those should be added to .gitignore"
+
+          git status --short
+          exit 1
+        fi
+
+  doc:
+    desc: |
+      Start godoc server on port {{ .GODOC_PORT }} in the background
+      Can be stopped with `task doc:clean`
+    cmds:
+      - go run golang.org/x/tools/cmd/godoc -http=:{{ .GODOC_PORT }} &
+      - printf "godoc started in the background at http://localhost:{{ .GODOC_PORT }}/ \nto stop it use\ntask doc:clean"
+
+  doc:clean:
+    desc: "Stops godoc started with `task doc`. If port {{ .GODOC_PORT }} is not exposed, does nothing"
+    cmds:
+      - |
+        if netstat -tulpn | grep ":{{ .GODOC_PORT }}" | grep godoc; then
+          netstat -tulpn | grep ":{{ .GODOC_PORT }}" | grep godoc | awk '{print $7}' | cut -d '/' -f1 | xargs --no-run-if-empty kill
+        fi
+
+  setup:
+    desc: "Prepares local environment before development, build, tests etc."
+    cmds:
+      - task: deps
+      - task: gen
+      - mkdir -p ./bin
+
+  clean:
+    desc: "Cleans project directory"
+    deps:
+      - gen:clean
+      - doc:clean
+    cmds:
+      - rm -rf ./bin/
+
+  tools:
+    desc: |-
+      Install tools versioned with go.mod and tools.go
+      Those are not required to build the project, but might be useful for configuring the IDE
+      e.g. having gofumpt installed as a binary allows you to run it once file changes with plugin 'File Watchers'
+    cmds:
+      - |
+        tools=$(find . -name "tools.go" | while read toolFile; do grep "_" "$toolFile" | awk '{print $2}'; done | tr -d \" | sort | uniq )
+        echo "$tools" | while IFS= read -r tool
+        do
+            echo "installing $tool"
+            modLine=$(grep "$tool" go.mod || echo "not found")
+            if [[ "$modLine" == "not found" ]]; then
+              # trims url starting from /cmd
+              noCmd=$(echo "$tool" | awk -F "/cmd" '{print $1}')
+              modLine=$(grep "$noCmd" go.mod)
+            fi
+
+            version=$(echo "$modLine" | awk '{print $2}' | tr -d \")
+            echo "found version: $version"
+            go install "$tool@$version"
+            echo "installed: $tool@$version"
+          echo
+        done
+
+  ci:
+    desc: "Runs all the CI steps in correct order"
+    cmds:
+      - task: setup
+      - task: ci:qa
+
+  ci:qa:
+    desc: "Runs static code analysis and regression tests"
+    deps:
+      - lint:mod
+      - lint:dirty
+      - lint
+      - deps:scan
+    cmds:
+      - task: test
+      - task: test:reports
+
+  default:
+    cmds:
+      - task -l

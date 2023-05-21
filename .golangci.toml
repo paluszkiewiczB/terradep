@@ -1,0 +1,63 @@
+root = true
+
+[output]
+format = "colored-line-number"
+
+[linters]
+enable = [
+	# Visit https://golangci-lint.run/usage/linters/
+	# for the full, current list of available linters.
+
+	# Default linters
+	"errcheck", # Detect unchecked errors
+	"gosimple", # Suggest code simplifications
+	"govet", # Reports suspicious constructs
+	"ineffassign", # Detects unused variable assignments
+	"staticcheck", # go vet on steroids
+	"typecheck", # Standard Go type checks
+	"unused", # Detect unused constants, variables, functions and types
+
+	# Extra linters
+	"bodyclose", # checks whether HTTP response body is closed successfully
+	"contextcheck", # check whether the function uses a non-inherited context
+	"cyclop", # checks function and package cyclomatic complexity
+	"dogsled", # Checks assignments with too many blank identifiers (e.g. x, , , _, := f())
+	"durationcheck", # check for two durations multiplied together
+	"errchkjson", # Checks types passed to the json encoding functions. Reports unsupported types and optionally reports occasions, where the check for the returned error can be omitted.
+	"errname", # Checks that sentinel errors are prefixed with the Err and error types are suffixed with the Error.
+	"errorlint", # errorlint is a linter for that can be used to find code that will cause problems with the error wrapping scheme introduced in Go 1.13.
+	"execinquery", # execinquery is a linter about query string checker in Query function which reads your Go src files and warning it finds
+	"exhaustive", # check exhaustiveness of enum switch statements
+	"exportloopref", # checks for pointers to enclosing loop variables
+	"gocheckcompilerdirectives", # Checks that go compiler directive comments (//go:) are valid.
+	"goconst", # Finds repeated strings that could be replaced by a constant
+	"gocritic", # Provides diagnostics that check for bugs, performance and style issues.
+	"gofumpt", # Gofumpt checks whether code was gofumpt-ed.
+	"gomnd", # An analyzer to detect magic numbers.
+	"gosec", # Inspects source code for security problems
+	"loggercheck", # Checks key value pairs for common logger libraries (kitlog,klog,logr,zap).
+	"makezero", # Finds slice declarations with non-zero initial length
+	"misspell", # Finds commonly misspelled English words in comments
+	"musttag", # enforce field tags in (un)marshaled structs
+	"nilerr", # Finds the code that returns nil even if it checks that the error is not nil.
+	"noctx", # noctx finds sending http request without context.Context
+	"prealloc", # Finds slice declarations that could potentially be pre-allocated
+	"predeclared", # find code that shadows one of Go's predeclared identifiers
+	"promlinter", # Check Prometheus metrics naming via promlint
+	"reassign", # Checks that package variables are not reassigned
+	"revive", # Fast, configurable, extensible, flexible, and beautiful linter for Go. Drop-in replacement of golint.
+	"rowserrcheck", # checks whether Err of rows is checked successfully
+	"sqlclosecheck", # Checks that sql.Rows and sql.Stmt are closed.
+	"testpackage", # linter that makes you use a separate _test package
+	"unconvert", # Remove unnecessary type conversions
+	"unparam", # Reports unused function parameters
+	"usestdlibvars", # A linter that detect the possibility to use variables/constants from the Go standard library.
+	"wastedassign", # wastedassign finds wasted assignment statements.
+	"whitespace", # Tool for detection of leading and trailing whitespace
+]
+
+[issues]
+exclude-use-default = false
+
+[run]
+tests = false
