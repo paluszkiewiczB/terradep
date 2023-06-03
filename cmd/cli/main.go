@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 
+	"go.interactor.dev/terradep/state"
+
 	"go.interactor.dev/terradep/encoding"
 
 	"go.interactor.dev/terradep"
@@ -19,7 +21,11 @@ func main() {
 	path := os.Args[1]
 	log.Printf("analyzing: %s", path)
 
-	s := terradep.NewScanner(nil)
+	stater := state.NewByTypeStater(map[string]terradep.Stater{
+		state.S3Backend: state.NewS3Stater(state.WithS3Region(), state.WithS3Encryption()),
+	})
+
+	s := terradep.NewScanner(stater)
 	graph, err := s.Scan(path)
 	if err != nil {
 		log.Printf("failed to scan path: %s, error was: %s", path, err)

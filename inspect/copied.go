@@ -55,7 +55,6 @@ func FindTerraformBlock(dir string) (*hcl.Block, error) {
 			continue
 		}
 
-		// FIXME why rootSchema does not match anything?
 		content, _, diag := file.Body.PartialContent(rootSchema)
 		if diag.HasErrors() || content == nil {
 			continue

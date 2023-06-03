@@ -1,7 +1,13 @@
+# ide
 .idea
+.fleet
 *.iml
 
+# ci
 bin
+
+# local
 .local.env
+*.dot
 
 

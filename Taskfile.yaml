@@ -7,6 +7,7 @@ dotenv: [ '.local.env' ]
 vars:
   INFRA_DIR: '{{ .INFRA_DIR | default "./example" }}' # TODO prepare example directory, for now setting env INFRA_DIR is mandatory
   GODOC_PORT: "6060"
+  DOCKER_IMAGE_NAME: ' {{ .DOCKER_IMAGE_NAME | default "terradep:latest" }}'
 
 tasks:
   build:
@@ -16,6 +17,12 @@ tasks:
     cmds:
       - go build -o ./bin/terradep ./cmd/cli
 
+  build:docker:
+    desc: "Builds the binary and Docker image. Binary is built on a host system, not inside Docker, so host system must have Go SDK and other required tools installed"
+    deps:
+      - build
+    cmds:
+      - docker build . -t {{ .DOCKER_IMAGE_NAME }}
   run:
     desc: "Runs CLI on infra repo"
     deps:
@@ -24,19 +31,32 @@ tasks:
       - go run ./cmd/cli {{ .INFRA_DIR }}/{{ .CLI_ARGS | splitList " " | join "/" }}
 
   run:ascii:
-    deps:
-      - setup
-    desc: -|
+    desc: |
       Runs CLI on infra repo and produces graph in ASCII
       Requires having graph-easy installed locally on via whalebrew
       Ubuntu/Debian - https://stackoverflow.com/questions/3211801/graphviz-and-ascii-output
       Mac (native) - https://stackoverflow.com/a/3391213/11342101
       Mac (Docker/whalebrew) - https://stackoverflow.com/a/55403011/11342101
+    deps:
+      - setup
     preconditions:
       - command -v graph-easy >> /dev/null
     cmds:
-      - go run ./cmd/cli {{ .INFRA_DIR}}/{{ .CLI_ARGS | splitList " " | join "/" }} ./bin/{{ .CLI_ARGS | splitList " " | last }}.dot
+      - go run ./cmd/cli {{ .INFRA_DIR}}/{{ .CLI_ARGS | splitList " " | initial | join "/" }} ./bin/{{ .CLI_ARGS | splitList " " | last }}.dot
       - graph-easy --from_graphviz --as=boxart --output=./bin/{{ .CLI_ARGS | splitList " " | last }}.txt ./bin/{{ .CLI_ARGS | splitList " " | last }}.dot
+  run:docker:
+    desc: "Runs CLI on infra repo inside Docker container and produces graph in DOT format to file ./docker.dot "
+    deps:
+      - build:docker
+    cmds:
+      - touch docker.dot
+      - |
+        docker run \
+          -v {{ .INFRA_DIR}}/{{ .CLI_ARGS | splitList " " | initial | join "/" }}:/work/analyze:ro \
+          -v ./docker.dot:/work/output.dot:rw \
+          {{ .DOCKER_IMAGE_NAME }}
+
+
   test:
     desc: "Runs all the tests"
     deps:

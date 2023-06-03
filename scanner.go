@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zclconf/go-cty/cty"
+
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"go.interactor.dev/terradep/inspect"
 
@@ -17,21 +19,82 @@ import (
 	"github.com/hashicorp/terraform-config-inspect/tfconfig"
 )
 
+// State is used as unique identifier of Terraform state referenced by [terraform_remote_state] or in attribute [backend] in terraform block
+//
+// [terraform_remote_state]: https://developer.hashicorp.com/terraform/language/state/remote
+// [backend]: https://developer.hashicorp.com/terraform/language/settings/backends/configuration#using-a-backend-block
+type State fmt.Stringer
+
 // Scanner can scan the directories looking for a Terraform projects
 type Scanner struct {
 	skipDirs map[string]struct{}
+	stater   Stater
+}
+
+// Stater can read the state from attribute [backend] in terraform block or [terraform_remote_state]
+//
+// [backend]: https://developer.hashicorp.com/terraform/language/settings/backends/configuration#using-a-backend-block
+// [terraform_remote_state]: https://developer.hashicorp.com/terraform/language/state/remote
+type Stater interface {
+	BackendState(backend string, body hcl.Body) (State, error)
+	RemoteState(backend string, config map[string]cty.Value) (State, error)
 }
 
 // NewScanner returns initialized instance of Scanner
-func NewScanner(globs map[string]struct{}) *Scanner {
-	if len(globs) == 0 {
-		globs = defaultSkips
+func NewScanner(stater Stater, opts ...ScannerOpt) *Scanner {
+	cfg := &scannerCfg{
+		globs:      DefaultSkipDirs,
+		extraGlobs: nil,
 	}
 
-	return &Scanner{skipDirs: globs}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	return &Scanner{
+		stater:   stater,
+		skipDirs: cfg.mergeGlobs(),
+	}
 }
 
-var defaultSkips = map[string]struct{}{".terraform": {}, ".idea": {}, ".vscode": {}, ".external_modules": {}}
+// ScannerOpt is used by [NewScanner] to change behaviour of created [Scanner]
+type ScannerOpt func(cfg *scannerCfg)
+
+// SetSkipDirs specifies which directories must be skipped by the [Scanner].
+// If not set, defaults to [DefaultSkipDirs]
+func SetSkipDirs(dirs []string) ScannerOpt {
+	return func(cfg *scannerCfg) {
+		cfg.globs = dirs
+	}
+}
+
+// AddSkipDirs adds more dirs to be skipped. It can extend dirs set with [SetSkipDirs] or [DefaultSkipDirs]
+func AddSkipDirs(dirs []string) ScannerOpt {
+	return func(cfg *scannerCfg) {
+		cfg.extraGlobs = append(cfg.extraGlobs, dirs...)
+	}
+}
+
+type scannerCfg struct {
+	globs      []string
+	extraGlobs []string
+}
+
+func (c scannerCfg) mergeGlobs() map[string]struct{} {
+	out := make(map[string]struct{}, 0)
+	for _, dir := range c.globs {
+		out[dir] = struct{}{}
+	}
+	for _, dir := range c.extraGlobs {
+		out[dir] = struct{}{}
+	}
+
+	return out
+}
+
+// DefaultSkipDirs is a slice of directories skipped by a [Scanner] by default when creating it with [NewScanner]
+// It can be overridden with [SetSkipDirs] or extended with [AddSkipDirs]
+var DefaultSkipDirs = []string{".terraform", ".idea", ".vscode", ".external_modules"}
 
 // Scan recursively scans the root directory and tries to find Terraform modules
 func (s *Scanner) Scan(root string) (*Graph, error) {
@@ -56,20 +119,20 @@ func (s *Scanner) Scan(root string) (*Graph, error) {
 			return nil
 		}
 
-		log.Printf("loading module from path: %q", path)
+		log.Printf("loading module from path: %s", path)
 
 		module, diag := tfconfig.LoadModule(path)
 		if diag.HasErrors() {
 			return fmt.Errorf("loading module: %q, %w", path, err)
 		}
 
-		dependencies, err := findDependencies(module)
+		dependencies, err := s.findDependencies(module)
 		if err != nil {
 			return fmt.Errorf("finding dependencies in module: %s, %w", path, err)
 		}
 		modDeps[module.Path] = dependencies
 
-		tfState, err := findState(module)
+		tfState, err := s.findState(module)
 		if err != nil {
 			return fmt.Errorf("find state in module: %s, %w", path, err)
 		}
@@ -165,7 +228,7 @@ func groupByState(nodes []*Node) map[State]*Node {
 	return out
 }
 
-func findDependencies(module *tfconfig.Module) (out []State, err error) {
+func (s *Scanner) findDependencies(module *tfconfig.Module) (out []State, err error) {
 	remoteStates := make([]*tfconfig.Resource, 0)
 	for _, resource := range module.DataResources {
 		if resource.Type == "terraform_remote_state" {
@@ -175,7 +238,7 @@ func findDependencies(module *tfconfig.Module) (out []State, err error) {
 
 	for file, resources := range groupResByFile(remoteStates) {
 		// grouping allows to parse file only once
-		states, err := parseTerraformRemoteStates(file, resources)
+		states, err := s.parseTerraformRemoteStates(file, resources)
 		if err != nil {
 			return nil, err
 		}
@@ -190,30 +253,19 @@ func findDependencies(module *tfconfig.Module) (out []State, err error) {
 example:
 
 	//data "terraform_remote_state" "domain_data" {
-	  backend = "s3"
+	  backend = "someBackendType"
 
 	  config = {
-		bucket  = "your-bucket"
-		key     = "terraform/domain/deployment/tfstate.json"
-		region  = "eu-west-3"
-		encrypt = true
+		some = "data"
 	  }
 	}
 */
 type remoteState struct {
-	Backend string           `hcl:"backend"`
-	Config  *s3BackendConfig `hcl:"config"`
+	Backend string         `hcl:"backend"`
+	Config  hcl.Attributes `hcl:",remain"`
 }
 
-type s3BackendConfig struct {
-	Bucket  string    `hcl:"bucket" cty:"bucket"`
-	Key     string    `hcl:"key" cty:"key"`
-	Region  string    `hcl:"region" cty:"region"`
-	Encrypt bool      `hcl:"encrypt,option" cty:"encrypt"`
-	Remain  *hcl.Body `hcl:"remain"`
-}
-
-func parseTerraformRemoteStates(file string, resources []*tfconfig.Resource) ([]State, error) {
+func (s *Scanner) parseTerraformRemoteStates(file string, resources []*tfconfig.Resource) ([]State, error) {
 	parser := hclparse.NewParser()
 	hclFile, diags := parser.ParseHCLFile(file)
 	if diags.HasErrors() {
@@ -225,7 +277,7 @@ func parseTerraformRemoteStates(file string, resources []*tfconfig.Resource) ([]
 		return nil, diags
 	}
 
-	remoteStates := make([]*remoteState, 0, len(resources))
+	remoteStates := make([]State, 0, len(resources))
 	for _, block := range content.Blocks {
 		const trs = "terraform_remote_state"
 		if resType := block.Labels[0]; resType != trs {
@@ -238,13 +290,17 @@ func parseTerraformRemoteStates(file string, resources []*tfconfig.Resource) ([]
 			return nil, fmt.Errorf("block %q does not have the name", trs)
 		}
 
-		state := &remoteState{}
-		diags := gohcl.DecodeBody(block.Body, nil, state)
-		if diags.HasErrors() {
-			return nil, fmt.Errorf("decoding block body to remoteState: %w", diags)
+		backend, backendCfg, err := parseRemoteState(block)
+		if err != nil {
+			return nil, fmt.Errorf("parsing terraform remote state, %w", err)
 		}
 
-		log.Printf("decoded remote state: %v", *state)
+		state, err := s.stater.RemoteState(backend, backendCfg)
+		if err != nil {
+			return nil, fmt.Errorf("reading state from terraform_remote_state: %q, %w", stateName, err)
+		}
+
+		log.Printf("decoded remote state: %s", state)
 		remoteStates = append(remoteStates, state)
 	}
 
@@ -252,20 +308,25 @@ func parseTerraformRemoteStates(file string, resources []*tfconfig.Resource) ([]
 		return nil, fmt.Errorf("expected to parse: %d remote states, but found: %d", len(resources), len(remoteStates))
 	}
 
-	states := make([]State, 0, len(remoteStates))
-	for _, state := range remoteStates {
-		// TODO support more backends by injectable mappers
-		if state.Backend != "s3" {
-			return nil, fmt.Errorf("unsupported backend type: %q, must be 's3'", state.Backend)
-		}
+	return remoteStates, nil
+}
 
-		states = append(states, S3State{
-			Bucket: state.Config.Bucket,
-			Key:    state.Config.Key,
-		})
+func parseRemoteState(block *hcl.Block) (backend string, cfg map[string]cty.Value, err error) {
+	rs := &remoteState{}
+	diags := gohcl.DecodeBody(block.Body, nil, rs)
+	if diags.HasErrors() {
+		return "", nil, fmt.Errorf("decoding block body to remoteState: %w", diags)
 	}
 
-	return states, nil
+	value, diags := rs.Config["config"].Expr.Value(nil)
+	if diags.HasErrors() {
+		return "", nil, fmt.Errorf("reading value of remote state config, %w", diags)
+	}
+	if !value.Type().IsObjectType() {
+		return "", nil, fmt.Errorf("terraform remote state config must be an object")
+	}
+
+	return rs.Backend, value.AsValueMap(), nil
 }
 
 // groupResByFiles accepts map of resources, ignores the key and returns map where key is file containing the resources
@@ -286,39 +347,24 @@ example:
 	terraform {
 	  required_version = "1.2.7"
 
-	  backend "s3" {
-		bucket  = "your-bucket"
-		key     = "terraform/domain/deployment/tfstate.json"
-		region  = "eu-west-3"
-	    encrypt = true
+	  backend "someBackend" {
+		some = "data"
+		other = ["list"]
 	  }
 	}
 */
-// FIXME this is s3-specific, should be generified once more types of backend is supported
 type terraformBlock struct {
-	Version string                   `hcl:"required_version,attr" cty:"required_version,attr"`
-	Backend *terraformBlockS3Backend `hcl:"backend,block"`
+	Version string `hcl:"required_version,attr" cty:"required_version,attr"`
+	Backend struct {
+		Type string   `hcl:"type,label" cty:"type,label"`
+		Body hcl.Body `hcl:",remain"`
+	} `hcl:"backend,block"`
 
 	// Remain stores unused part of the body, e.g. required_providers
 	Remain hcl.Body `hcl:",remain"`
 }
 
-type terraformBlockS3Backend struct {
-	Type    string `hcl:"type,label" cty:"type,label"`
-	Bucket  string `hcl:"bucket" cty:"bucket"`
-	Key     string `hcl:"key" cty:"key"`
-	Region  string `hcl:"region" cty:"region"`
-	Encrypt bool   `hcl:"encrypt" cty:"encrypt"`
-}
-
-func (b terraformBlockS3Backend) toState() S3State {
-	return S3State{
-		Bucket: b.Bucket,
-		Key:    b.Key,
-	}
-}
-
-func findState(mod *tfconfig.Module) (State, error) {
+func (s *Scanner) findState(mod *tfconfig.Module) (State, error) {
 	block, err := inspect.FindTerraformBlock(mod.Path)
 	if err != nil {
 		return nil, fmt.Errorf("finding terraform block for in module: %s, %w", mod.Path, err)
@@ -330,7 +376,7 @@ func findState(mod *tfconfig.Module) (State, error) {
 		return nil, fmt.Errorf("decoding terraform block to object: %w", diags)
 	}
 
-	return tb.Backend.toState(), nil
+	return s.stater.BackendState(tb.Backend.Type, tb.Backend.Body)
 }
 
 func checkIfDirExists(path string) error {
@@ -392,25 +438,6 @@ func (n *Node) String() string {
 	}
 	sb.WriteString("}")
 	return sb.String()
-}
-
-// State is used as unique identifier of Terraform state referenced by [terraform_remote_state] or in attribute [backend] in terraform block
-//
-// [terraform_remote_state]: https://developer.hashicorp.com/terraform/language/state/remote
-// [backend]: https://developer.hashicorp.com/terraform/language/settings/backends/configuration#using-a-backend-block
-type State fmt.Stringer
-
-// S3State represents Terraform state stored in S3 bucket
-type S3State struct {
-	// Bucket is name of S3 bucket
-	Bucket string
-	// Bucket key of the object in S3 bucket
-	Key string
-}
-
-// String implements State
-func (s S3State) String() string {
-	return fmt.Sprintf("s3://%s/%s", s.Bucket, s.Key)
 }
 
 var backendSchema = &hcl.BodySchema{
