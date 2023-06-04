@@ -30,7 +30,7 @@ func NewS3Stater(opts ...S3StaterOpt) *S3Stater {
 // S3StaterOpt is used by [NewS3Stater] to customize behaviour of created [S3Stater]
 type S3StaterOpt func(cfg *s3StaterCfg)
 
-// WithS3Region makes [S3Stater.State] add region to returned [terradep.State].
+// WithS3Region makes [S3Stater] add region to returned [terradep.State].
 // When this option is used states with different regions won't be equal.
 // When region is not specified it is treated as empty string
 func WithS3Region() S3StaterOpt {
@@ -39,7 +39,7 @@ func WithS3Region() S3StaterOpt {
 	}
 }
 
-// WithS3Encryption makes [S3Stater.State] add encryption to returned [terradep.State].
+// WithS3Encryption makes [S3Stater] add encryption to returned [terradep.State].
 // When this option is used states with different encryption won't be equal.
 // When encryption is not specified it is treated as false
 func WithS3Encryption() S3StaterOpt {

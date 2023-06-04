@@ -21,9 +21,11 @@ var rootSchema = &hcl.BodySchema{
 	},
 }
 
-// FindTerraformBlock finds terraform files in dir and finds first occurrence of block "terraform" to read its "backend" attributes
-// this solution will not work with partial backend configuration: https://developer.hashicorp.com/terraform/language/settings/backends/configuration#partial-configuration
-// uses logic from function loadModule from /home/bartopal/github/terraform-config-inspect/tfconfig/load_hcl.go
+// FindTerraformBlock finds terraform files in dir and finds first occurrence of block "terraform" to read its "backend" attributes.
+// This solution will not work with partial backend configuration: https://developer.hashicorp.com/terraform/language/settings/backends/configuration#partial-configuration.
+// Uses logic from function loadModule from [terraform-config-inspect]/tfconfig/load_hcl.go
+//
+// [terraform-config-inspect]: https://github.com/hashicorp/terraform-config-inspect/
 func FindTerraformBlock(dir string) (*hcl.Block, error) {
 	fs := tfconfig.NewOsFs()
 	primaryPaths, diags := DirFiles(fs, dir)
@@ -70,8 +72,10 @@ func FindTerraformBlock(dir string) (*hcl.Block, error) {
 	return terraformBlock, nil
 }
 
-// DirFiles lists all the files which are a part of Terraform project within the fs
-// is a copy of unexported function dirFiles from terraform-config-inspect/tfconfig/load.go
+// DirFiles lists all the files which are a part of Terraform project within the fs.
+// Code is a copy of unexported function dirFiles from [terraform-config-inspect]/tfconfig/load.go
+//
+// [terraform-config-inspect]: https://github.com/hashicorp/terraform-config-inspect/
 func DirFiles(fs tfconfig.FS, dir string) (primary []string, diags hcl.Diagnostics) { //nolint:all
 	infos, err := fs.ReadDir(dir)
 	if err != nil {

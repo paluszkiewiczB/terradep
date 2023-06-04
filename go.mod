@@ -7,6 +7,7 @@ require (
 	github.com/golangci/golangci-lint v1.52.2
 	github.com/hashicorp/hcl/v2 v2.16.2
 	github.com/hashicorp/terraform-config-inspect v0.0.0-20230413234026-f1617e8a5fcc
+	github.com/zclconf/go-cty v1.12.1
 	golang.org/x/tools v0.9.1
 	gonum.org/v1/gonum v0.13.0
 	mvdan.cc/gofumpt v0.5.0
@@ -170,7 +171,6 @@ require (
 	github.com/yagipy/maintidx v1.0.0 // indirect
 	github.com/yeya24/promlinter v0.2.0 // indirect
 	github.com/yuin/goldmark v1.4.13 // indirect
-	github.com/zclconf/go-cty v1.12.1 // indirect
 	gitlab.com/bosi/decorder v0.2.3 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
