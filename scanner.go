@@ -175,7 +175,7 @@ func buildTree(states map[string]State, deps map[string][]State) *Graph {
 		for _, childState := range modDeps {
 			childNode, ok := nodesByState[childState]
 			if !ok {
-				// this is external module - not known to the scanner - it will never have children and path
+				// this is external module - not known to the scanner - it will never have children
 				log.Printf("found external module with state: %s", childState)
 				childNode = &Node{
 					State: childState,

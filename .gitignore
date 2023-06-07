@@ -9,5 +9,5 @@ bin
 # local
 .local.env
 *.dot
-
+*.log
 
