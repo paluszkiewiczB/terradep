@@ -178,6 +178,7 @@ func buildTree(states map[string]State, deps map[string][]State) *Graph {
 				// this is external module - not known to the scanner - it will never have children
 				log.Printf("found external module with state: %s", childState)
 				childNode = &Node{
+					Path:  childState.String(),
 					State: childState,
 				}
 			}
