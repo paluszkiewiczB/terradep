@@ -156,6 +156,8 @@ tasks:
       - doc:clean
     cmds:
       - rm -rf ./bin/
+      - rm ./*.dot || true
+      - rm ./*.log || true
 
   tools:
     desc: |-
