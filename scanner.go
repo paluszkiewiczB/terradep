@@ -4,10 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/exp/slog"
 
 	"github.com/zclconf/go-cty/cty"
 
@@ -29,6 +30,8 @@ type State fmt.Stringer
 type Scanner struct {
 	skipDirs map[string]struct{}
 	stater   Stater
+
+	log *slog.Logger
 }
 
 // Stater can read the state from attribute [backend] in terraform block or [terraform_remote_state]
@@ -41,7 +44,7 @@ type Stater interface {
 }
 
 // NewScanner returns initialized instance of Scanner
-func NewScanner(stater Stater, opts ...ScannerOpt) *Scanner {
+func NewScanner(log *slog.Logger, stater Stater, opts ...ScannerOpt) *Scanner {
 	cfg := &scannerCfg{
 		globs:      DefaultSkipDirs,
 		extraGlobs: nil,
@@ -54,6 +57,7 @@ func NewScanner(stater Stater, opts ...ScannerOpt) *Scanner {
 	return &Scanner{
 		stater:   stater,
 		skipDirs: cfg.mergeGlobs(),
+		log:      log,
 	}
 }
 
@@ -98,7 +102,7 @@ var DefaultSkipDirs = []string{".terraform", ".idea", ".vscode", ".external_modu
 
 // Scan recursively scans the root directory and tries to find Terraform modules
 func (s *Scanner) Scan(root string) (*Graph, error) {
-	if err := checkIfDirExists(root); err != nil {
+	if err := checkDirExists(root); err != nil {
 		return nil, err
 	}
 
@@ -115,11 +119,11 @@ func (s *Scanner) Scan(root string) (*Graph, error) {
 		}
 
 		if !tfconfig.IsModuleDir(path) {
-			log.Printf("not a module dir: %s", path)
+			s.log.Debug("not a module dir", slog.String("path", path))
 			return nil
 		}
 
-		log.Printf("loading module from path: %s", path)
+		s.log.Info("loading module", slog.String("path", path))
 
 		module, diag := tfconfig.LoadModule(path)
 		if diag.HasErrors() {
@@ -145,18 +149,18 @@ func (s *Scanner) Scan(root string) (*Graph, error) {
 		return nil, err
 	}
 
-	return buildTree(modStates, modDeps), nil
+	return buildTree(s.log, modStates, modDeps), nil
 }
 
-func buildTree(states map[string]State, deps map[string][]State) *Graph {
-	log.Printf("building dependency tree")
+func buildTree(log *slog.Logger, states map[string]State, deps map[string][]State) *Graph {
+	log.Info("building dependency tree")
 
 	for path, state := range states {
-		log.Printf("module: %s has state: %v", path, state)
+		log.Debug("", slog.String("module", path), slog.String("state", state.String()))
 	}
 
 	for path, dep := range deps {
-		log.Printf("module: %s has %d dependencies", path, len(dep))
+		log.Debug("", slog.String("module", path), slog.Any("deps", dep))
 	}
 
 	nodes := make([]*Node, 0, len(states))
@@ -176,7 +180,7 @@ func buildTree(states map[string]State, deps map[string][]State) *Graph {
 			childNode, ok := nodesByState[childState]
 			if !ok {
 				// this is external module - not known to the scanner - it will never have children
-				log.Printf("found external module with state: %s", childState)
+				log.Warn("found external module", slog.String("state", childState.String()))
 				childNode = &Node{
 					Path:  childState.String(),
 					State: childState,
@@ -282,7 +286,7 @@ func (s *Scanner) parseTerraformRemoteStates(file string, resources []*tfconfig.
 	for _, block := range content.Blocks {
 		const trs = "terraform_remote_state"
 		if resType := block.Labels[0]; resType != trs {
-			log.Printf("skip block because first label is not: %q, but: %q", trs, resType)
+			s.log.Warn("skipping block because first label is wrong", slog.String("expected", trs), slog.String("actual", resType))
 			continue
 		}
 
@@ -301,7 +305,7 @@ func (s *Scanner) parseTerraformRemoteStates(file string, resources []*tfconfig.
 			return nil, fmt.Errorf("reading state from terraform_remote_state: %q, %w", stateName, err)
 		}
 
-		log.Printf("decoded remote state: %s", state)
+		s.log.Info("decoded remote state", slog.String("state", state.String()))
 		remoteStates = append(remoteStates, state)
 	}
 
@@ -366,7 +370,7 @@ type terraformBlock struct {
 }
 
 func (s *Scanner) findState(mod *tfconfig.Module) (State, error) {
-	block, err := inspect.FindTerraformBlock(mod.Path)
+	block, err := inspect.FindTerraformBlock(s.log, mod.Path)
 	if err != nil {
 		return nil, fmt.Errorf("finding terraform block for in module: %s, %w", mod.Path, err)
 	}
@@ -380,7 +384,7 @@ func (s *Scanner) findState(mod *tfconfig.Module) (State, error) {
 	return s.stater.BackendState(tb.Backend.Type, tb.Backend.Body)
 }
 
-func checkIfDirExists(path string) error {
+func checkDirExists(path string) error {
 	stat, err := os.Stat(path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -405,27 +409,27 @@ type Graph struct {
 }
 
 // MergeGraphs merges graph into one
-func MergeGraphs(graphs ...*Graph) (*Graph, error) {
+func MergeGraphs(log *slog.Logger, graphs ...*Graph) (*Graph, error) {
 	states := make(map[string]State)
 	deps := make(map[string][]State)
 
 	for _, g := range graphs {
 		for path, state := range g.states {
 			if old, ok := states[path]; ok {
-				log.Printf("merging state path collision, old: %q, new %q", old, state)
+				log.Warn("merging state path collision", slog.String("old", old.String()), slog.String("new", state.String()))
 			}
 			states[path] = state
 		}
 
 		for parentPath, modDeps := range g.deps {
 			if old, ok := deps[parentPath]; ok {
-				log.Printf("merging dep path collision, appending to old: %v, new %v", old, modDeps)
+				log.Warn("merging dep path collision, appending", slog.Any("old", old), slog.Any("new", deps))
 			}
 			deps[parentPath] = append(deps[parentPath], modDeps...)
 		}
 	}
 
-	return buildTree(states, deps), nil
+	return buildTree(log, states, deps), nil
 }
 
 // String is insanely poor implementation of representing the Graph in JSON lines format.

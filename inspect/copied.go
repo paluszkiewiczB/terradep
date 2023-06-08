@@ -2,9 +2,10 @@ package inspect
 
 import (
 	"fmt"
-	"log"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/exp/slog"
 
 	"github.com/hashicorp/hcl/v2/hclparse"
 
@@ -26,11 +27,11 @@ var rootSchema = &hcl.BodySchema{
 // Uses logic from function loadModule from [terraform-config-inspect]/tfconfig/load_hcl.go
 //
 // [terraform-config-inspect]: https://github.com/hashicorp/terraform-config-inspect/
-func FindTerraformBlock(dir string) (*hcl.Block, error) {
+func FindTerraformBlock(log *slog.Logger, dir string) (*hcl.Block, error) {
 	fs := tfconfig.NewOsFs()
 	primaryPaths, diags := DirFiles(fs, dir)
 
-	log.Printf("looking for block 'terraform' in paths: %v", primaryPaths)
+	log.Info("looking for block 'terraform'", slog.Any("paths", primaryPaths))
 	parser := hclparse.NewParser()
 
 	var terraformBlock *hcl.Block
