@@ -3,11 +3,15 @@
 .fleet
 *.iml
 
-# ci
-bin
-
 # local
 .local.env
 *.dot
 *.log
+
+bin
+.task
+
+# should be modified only by CI, use git add --force
+README.md
+doc/cmd
 

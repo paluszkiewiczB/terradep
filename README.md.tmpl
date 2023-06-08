@@ -1,0 +1,39 @@
+# [{{ .Name }}{{ with .Version}} {{.}}{{end}}]({{ .NameURL }})
+
+
+CLI tools generating dependency graph for your Terraform deployments in [Terraservice setup](https://www.hashicorp.com/resources/evolving-infrastructure-terraform-opencredo)
+with dependencies passed through [terraform_remote_state](https://developer.hashicorp.com/terraform/language/state/remote)
+
+## Usage
+
+See [the docs]({{ printf "%s/%s" .UsageDir .UsageFile }})
+
+
+## Use case
+
+TODO: describe when it is useful
+
+## Example
+
+TODO: prepare example directory, remember to be usable through`task run` with example
+
+### Generate .DOT graph
+
+### Generate ASCII chart
+
+### Generate SVG
+
+## Build locally
+
+### Prerequisites
+
+1. Go 1.20
+2. [Task 3](https://taskfile.dev/installation/)
+
+### Build
+
+```bash
+go get
+task build
+{{ .Name }} --version
+```

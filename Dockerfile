@@ -5,6 +5,7 @@ WORKDIR /app
 RUN apt update -y && \
     apt install -y \
     libgraph-easy-perl # converts graphs in dot format to ascii
+
 COPY ./bin/terradep .
 
 ENTRYPOINT ["./terradep"]

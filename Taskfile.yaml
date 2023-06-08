@@ -23,6 +23,18 @@ tasks:
       - build
     cmds:
       - docker build . -t {{ .DOCKER_IMAGE_NAME }}
+    sources:
+      - Dockerfile
+      - ./bin/terradep
+
+  build:docs:
+    desc: "Builds the docs and README. Args are passed to docgen tool. Example: task build:docs -- --version v1.2.3"
+    deps:
+      - setup
+    cmds:
+      - go run ./cmd/docgen {{ .CLI_ARGS }}
+
+
   run:
     desc: "Runs CLI on infra repo"
     deps:
@@ -33,7 +45,7 @@ tasks:
   run:ascii:
     desc: |
       Runs CLI on infra repo and produces graph in ASCII
-      Requires having graph-easy installed locally on via whalebrew
+      Requires having graph-easy installed locally
       Ubuntu/Debian - https://stackoverflow.com/questions/3211801/graphviz-and-ascii-output
       Mac (native) - https://stackoverflow.com/a/3391213/11342101
       Mac (Docker/whalebrew) - https://stackoverflow.com/a/55403011/11342101
