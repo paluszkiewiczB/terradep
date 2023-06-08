@@ -155,8 +155,8 @@ func buildTree(states map[string]State, deps map[string][]State) *Graph {
 		log.Printf("module: %s has state: %v", path, state)
 	}
 
-	for path, states := range deps {
-		log.Printf("module: %s has %d dependencies", path, len(states))
+	for path, dep := range deps {
+		log.Printf("module: %s has %d dependencies", path, len(dep))
 	}
 
 	nodes := make([]*Node, 0, len(states))
@@ -200,7 +200,7 @@ func buildTree(states map[string]State, deps map[string][]State) *Graph {
 		panic("none of the modules is independent")
 	}
 
-	return &Graph{Heads: roots}
+	return &Graph{Heads: roots, states: states, deps: deps}
 }
 
 func groupByPath(nodes []*Node) map[string]*Node {
@@ -399,10 +399,37 @@ func checkIfDirExists(path string) error {
 type Graph struct {
 	// Heads are Nodes which represent Terraform deployments without dependencies to other states
 	Heads []*Node
+
+	states map[string]State
+	deps   map[string][]State
+}
+
+// MergeGraphs merges graph into one
+func MergeGraphs(graphs ...*Graph) (*Graph, error) {
+	states := make(map[string]State)
+	deps := make(map[string][]State)
+
+	for _, g := range graphs {
+		for path, state := range g.states {
+			if old, ok := states[path]; ok {
+				log.Printf("merging state path collision, old: %q, new %q", old, state)
+			}
+			states[path] = state
+		}
+
+		for parentPath, modDeps := range g.deps {
+			if old, ok := deps[parentPath]; ok {
+				log.Printf("merging dep path collision, appending to old: %v, new %v", old, modDeps)
+			}
+			deps[parentPath] = append(deps[parentPath], modDeps...)
+		}
+	}
+
+	return buildTree(states, deps), nil
 }
 
 // String is insanely poor implementation of representing the Graph in JSON lines format.
-// Assumes Node.String returns a JSON and concatenates them
+// Assumes Node.String returns a JSON
 func (g *Graph) String() string {
 	sb := strings.Builder{}
 	sb.WriteRune('\n')
@@ -422,6 +449,7 @@ type Node struct {
 	Children []*Node
 }
 
+// Represents [Node] in JSON format
 func (n *Node) String() string {
 	sb := strings.Builder{}
 	sb.WriteString("{\"name\":\"")

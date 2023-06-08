@@ -97,11 +97,19 @@ func generateGraph(c *cfg) func(*cobra.Command, []string) error {
 		})
 
 		s := terradep.NewScanner(stater)
-		// TODO support multiple dirs
-		graph, err := s.Scan(c.dirs[0])
+		graphs := make([]*terradep.Graph, len(c.dirs))
+		for i, dir := range c.dirs {
+			log.Printf("scanning directory: %s", dir)
+			graph, err := s.Scan(dir)
+			if err != nil {
+				return fmt.Errorf("failed to scan path: %s, error was: %w", dir, err)
+			}
+			graphs[i] = graph
+		}
+
+		graph, err := terradep.MergeGraphs(graphs...)
 		if err != nil {
-			log.Printf("failed to scan path: %s, error was: %s", c.dirs[0], err)
-			os.Exit(1)
+			return fmt.Errorf("failed to merge graphs, error was: %w", err)
 		}
 
 		log.Printf("scan successful, graph: %v", graph)
