@@ -60,7 +60,7 @@ func main() {
 	gF.StringVarP(&c.outFile, "out", "o", "", "Writes output to specified file. Fails when file already exists unless you set flag --force")
 	gF.StringVarP(&c.logFile, "log-file", "l", "", "Writes logs to specified file. When flag is set without parameter, name of the file is generated based on current time. If not set logs are written to standard error")
 	gF.Lookup("log-file").NoOptDefVal = string(filepath.Separator)
-	gF.BoolVar(&c.dryRun, "dry-run", false, "TODO: Does not produce the output. Can be used as a 'linter' for the input")
+	gF.BoolVar(&c.dryRun, "dry-run", false, "Does not produce the output. Can be used as a 'linter' for the input")
 	gF.BoolVarP(&c.force, "force", "f", false, "Writes output to file specified with --out even if it already exists. Existing file content WILL BE LOST")
 
 	err := graphCmd.MarkFlagRequired("dir")
@@ -121,8 +121,12 @@ func generateGraph(c *cfg) func(*cobra.Command, []string) error {
 }
 
 func buildOutput(c *cfg) (io.Writer, error) {
+	if c.dryRun {
+		return io.Discard, nil
+	}
+
 	if len(c.outFile) == 0 {
-		return os.Stdout, nil
+		return os.Stderr, nil
 	}
 
 	_, err := os.Stat(c.outFile)
