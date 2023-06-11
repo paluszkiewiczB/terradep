@@ -27,6 +27,7 @@ jobs:
         run: task ci
 
   release:
+    needs: trunk
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -42,7 +43,7 @@ jobs:
         run: go install github.com/go-task/task/v3/cmd/task@v3.24.0
 
       - name: Build docs
-        run: task build:doc --version '${{ github.ref_name }}' --url '$(head -n 1 go.mod | cut -d ' ' -f2)'
+        run: task build:doc -- --version '${{ github.ref_name }}' --url '$(head -n 1 go.mod | cut -d ' ' -f2)'
 
       - name: Check dirty
         run: task lint:dirty
